@@ -1,0 +1,224 @@
+/*
+- Gym management platform - data model
+- Role lifecycle: BASIC (default) -> MEMBER (on payment approval) -> back to BASIC (expiry/cancel/reduce-to-zero)
+- ADMIN = coach (seeded), SUPER_ADMIN = manages coaches.
+*/
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  BASIC
+  MEMBER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  ENDED
+}
+
+enum HistoryEndReason {
+  EXPIRED 
+  CANCELLED 
+  REDUCED_TO_ZERO 
+}
+
+model User {
+  id           String    @id @default(cuid())
+  username     String    @unique 
+  email        String    @unique 
+  password     String 
+  nickname     String? 
+  role         Role      @default(BASIC)
+  isVerified   Boolean   @default(false)
+  verifyToken  String?   @unique
+  resetToken   String?   @unique
+  resetExpires DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  memberProfile     MemberProfile?
+  payments          PaymentRequest[]
+  subscriptions     Subscription[]
+  history           SubscriptionHistory[]
+  loginAttempts     LoginAttempt[]
+  auditActions      AuditLog[]            @relation("AuditActor")
+  auditTargets      AuditLog[]            @relation("AuditTarget")
+  decidedPayments   PaymentRequest[]      @relation("PaymentDecider")
+  coachProfile      Coach?                @relation("CoachUser")
+
+  @@map("users")
+}
+
+model Coach {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  coachNumber Int     @unique 
+  name       String
+  bio        String   @default("")
+  specialty  String   @default("")
+  capacity   Int? 
+
+  user       User     @relation("CoachUser", fields: [userId], references: [id], onDelete: Cascade)
+  plans      Plan[]
+  members    MemberProfile[]
+  payments   PaymentRequest[]
+  subs       Subscription[]
+  history    SubscriptionHistory[]
+
+  @@map("coaches")
+}
+
+model MemberProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  memberId  String?   @unique 
+  coachId   String? 
+  startsAt  DateTime?
+  expiresAt DateTime?
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  coach Coach? @relation(fields: [coachId], references: [id])
+
+  @@index([coachId])
+  @@map("member_profiles")
+}
+
+model Plan {
+  id       String @id @default(cuid())
+  coachId  String
+  name     String 
+  months   Int
+  priceCents Int 
+
+  coach Coach @relation(fields: [coachId], references: [id], onDelete: Cascade)
+
+  @@unique([coachId, months])
+  @@map("plans")
+}
+
+model Subscription {
+  id        String    @id @default(cuid())
+  userId    String
+  coachId   String
+  planName  String
+  months    Int
+  startsAt  DateTime  @default(now())
+  expiresAt DateTime
+  status    SubscriptionStatus @default(ACTIVE) 
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  coach Coach @relation(fields: [coachId], references: [id])
+
+  @@index([userId, status])
+  @@index([coachId])
+  @@map("subscriptions")
+}
+
+model SubscriptionHistory {
+  id         String           @id @default(cuid())
+  userId     String
+  coachId    String
+  planName   String
+  months     Int
+  startedAt  DateTime
+  endedAt    DateTime         @default(now())
+  endReason  HistoryEndReason // what ended it
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  coach Coach @relation(fields: [coachId], references: [id])
+
+  @@index([userId])
+  @@index([coachId])
+  @@map("subscription_history")
+}
+
+model PaymentRequest {
+  id             String        @id @default(cuid())
+  userId         String
+  coachId        String
+  planId         String?
+  packageName    String
+  amountCents    Int
+  reference      String        @unique 
+  holderName     String
+  status         PaymentStatus @default(PENDING)
+  isExtension    Boolean       @default(false) 
+  decidedById    String?
+  decidedAt      DateTime?
+  rejectionNote  String?
+
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  coach   Coach  @relation(fields: [coachId], references: [id])
+  decider User?  @relation("PaymentDecider", fields: [decidedById], references: [id])
+
+  @@index([userId, status])
+  @@index([status])
+  @@map("payment_requests")
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  username  String 
+  success   Boolean
+  ip        String
+  userId    String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([username, createdAt])
+  @@index([ip, createdAt])
+  @@map("login_attempts")
+}
+
+
+model DeletedAccount {
+  id          String   @id @default(cuid())
+  originalId  String   @unique
+  username    String
+  email       String
+  roleAtDeletion Role
+  deletedAt   DateTime @default(now())
+
+  @@map("deleted_accounts")
+}
+
+
+model RevokedToken {
+  id        String   @id @default(cuid())
+  jti       String   @unique
+  userId    String
+  expiresAt DateTime 
+
+  @@index([userId])
+  @@map("revoked_tokens")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String 
+  action    String 
+  targetUserId String?
+  details   String?  @db.Text
+  createdAt DateTime @default(now())
+
+  actor  User  @relation("AuditActor", fields: [actorId], references: [id])
+  target User? @relation("AuditTarget", fields: [targetUserId], references: [id])
+
+  @@index([createdAt])
+  @@map("audit_logs")
+}

@@ -1,0 +1,827 @@
+{
+  "info": {
+    "name": "Gym Management API",
+    "description": "Comprehensive collection of every endpoint in the gym-api project, organized by module. Authentication uses a JWT Bearer token whose value is stored in the `accessToken` environment variable and attached to the `Authorization` header via the collection-level header. The base URL is read from the `baseUrl` environment variable so the same collection can target Local, Staging, or Production by switching the active Postman Environment.\n\nResponse envelope:\n- Success: { \"status\": \"success\", \"message\": \"...\", \"data\": { ... } }\n- Error:   { \"status\": \"error\", \"error\": { \"statusCode\", \"code\", \"message\", \"details\" } }\n\nWorkspace steps: import the collection, import the matching environment (gym-api.postman_environment.json), select the desired environment (Local/Staging/Production via `baseUrl`), then run the Login request to populate `accessToken` and `refreshToken`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Returns service name and uptime. No authentication required."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Signup",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"newmember\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/signup",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "signup"]
+            },
+            "description": "Registers a new account (role BASIC). Sends an email verification link. Rate limited: 10 requests / 15 min / IP."
+          },
+          "response": []
+        },
+        {
+          "name": "Verify email (query token)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/verify-email?token={{verifyEmailToken}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "verify-email"],
+              "query": [
+                {
+                  "key": "token",
+                  "value": "{{verifyEmailToken}}",
+                  "description": "Email verification token (min 10 characters)"
+                }
+              ]
+            },
+            "description": "Verifies a user's email via a token in the query string (email link)."
+          },
+          "response": []
+        },
+        {
+          "name": "Verify email (body token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{verifyEmailToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/verify-email",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "verify-email"]
+            },
+            "description": "Verifies a user's email via a token in the request body."
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.data) {",
+                  "  pm.environment.set('accessToken', json.data.accessToken);",
+                  "  pm.environment.set('refreshToken', json.data.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Authenticates a user and returns access + refresh tokens (valid 24h). Subject to brute-force lockout after repeated failures. The test script automatically stores `accessToken` and `refreshToken` in the active environment."
+          },
+          "response": []
+        },
+        {
+          "name": "Forgot password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/forgot-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "forgot-password"]
+            },
+            "description": "Sends a password reset email if the account exists. Rate limited: 5 requests / 15 min / IP."
+          },
+          "response": []
+        },
+        {
+          "name": "Reset password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{resetPasswordToken}}\",\n  \"newPassword\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/reset-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "reset-password"]
+            },
+            "description": "Sets a new password using a valid reset token."
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh access token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "refresh"]
+            },
+            "description": "Exchanges a valid refresh token for a new access token within the original 24h window. No Bearer header required."
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "logout"]
+            },
+            "description": "Revokes the current access token and the optional refresh token (blacklisted server-side). Requires authentication."
+          },
+          "response": []
+        },
+        {
+          "name": "Update profile (nickname)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nickname\": \"New Nickname\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "profile"]
+            },
+            "description": "Updates only the nickname. Strict schema: any other key is rejected. Requires authentication."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete account",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "account"]
+            },
+            "description": "Soft-deletes the authenticated user's account (archived to deleted_accounts). Requires BASIC role and no pending payment. Rate limited: 5 requests / 15 min / IP."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Coaches",
+      "item": [
+        {
+          "name": "Get coach profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/coaches/{{coachNumber}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["coaches", "{{coachNumber}}"]
+            },
+            "description": "Returns the public profile (bio/specialty) of a coach by coach number. Any authenticated user."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Subscriptions",
+      "item": [
+        {
+          "name": "Get subscription status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/subscriptions/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["subscriptions", "status"]
+            },
+            "description": "Returns the authenticated user's subscription status: free plan or active plan plus remaining days and expiry warning. Requires authentication."
+          },
+          "response": []
+        },
+        {
+          "name": "List subscription plans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/subscriptions/plans",
+              "host": ["{{baseUrl}}"],
+              "path": ["subscriptions", "plans"]
+            },
+            "description": "Returns available plans (4 durations x 3 coaches) with prices. Requires authentication."
+          },
+          "response": []
+        },
+        {
+          "name": "Confirm subscription selection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coachNumber\": {{coachNumber}},\n  \"months\": {{months}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/subscriptions/confirm",
+              "host": ["{{baseUrl}}"],
+              "path": ["subscriptions", "confirm"]
+            },
+            "description": "Validates coach + duration selection, enforcing the one-coach rule and soft capacity check. The server determines NEW vs EXTENSION. Requires authentication."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "Submit payment request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"holderName\": \"Ahmed Ali\",\n  \"reference\": \"PAY-REF-001\",\n  \"amount\": 500,\n  \"packageName\": \"1 Month Plan\",\n  \"coachNumber\": {{coachNumber}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/payments/",
+              "host": ["{{baseUrl}}"],
+              "path": ["payments", ""]
+            },
+            "description": "Submits a payment request. Unique reference required; NEW vs EXTENSION decided server-side. Any authenticated user."
+          },
+          "response": []
+        },
+        {
+          "name": "Decide payment request",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"approve\",\n  \"note\": \"Payment confirmed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/payments/{{paymentId}}/decide",
+              "host": ["{{baseUrl}}"],
+              "path": ["payments", "{{paymentId}}", "decide"]
+            },
+            "description": "Approves or rejects a pending payment request, with authoritative re-checks. Requires ADMIN (coach) role. Set `paymentId` from a submitted payment."
+          },
+          "response": []
+        },
+        {
+          "name": "List payment requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/payments/?page={{page}}&pageSize={{pageSize}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["payments", ""],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "{{page}}",
+                  "description": "Page number (1-indexed)"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "{{pageSize}}",
+                  "description": "Items per page (max 100)"
+                }
+              ]
+            },
+            "description": "Paginated payment log. ADMIN sees payments aimed at their coach account; SUPER_ADMIN sees all."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Members",
+      "item": [
+        {
+          "name": "List my members",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/members/?page={{page}}&pageSize={{pageSize}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["members", ""],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "{{page}}",
+                  "description": "Page number (1-indexed)"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "{{pageSize}}",
+                  "description": "Items per page (max 100)"
+                }
+              ]
+            },
+            "description": "Returns the authenticated coach's own active subscribers, paginated. Requires ADMIN role."
+          },
+          "response": []
+        },
+        {
+          "name": "Extend member subscription",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"months\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/members/{{userId}}/extend",
+              "host": ["{{baseUrl}}"],
+              "path": ["members", "{{userId}}", "extend"]
+            },
+            "description": "Adds months to a member's subscription. The member must belong to the coach's roster. Requires ADMIN role. Set `userId` to the member's user ID."
+          },
+          "response": []
+        },
+        {
+          "name": "Change member plan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"months\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/members/{{userId}}/change-plan",
+              "host": ["{{baseUrl}}"],
+              "path": ["members", "{{userId}}", "change-plan"]
+            },
+            "description": "Replaces a member's plan duration. Allowed values: 1, 3, 6, 12. Requires ADMIN role."
+          },
+          "response": []
+        },
+        {
+          "name": "Reduce member subscription",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"days\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/members/{{userId}}/reduce",
+              "host": ["{{baseUrl}}"],
+              "path": ["members", "{{userId}}", "reduce"]
+            },
+            "description": "Subtracts days from a member's subscription. If reduced to zero or below, triggers full expiration logic. Requires ADMIN role."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel member subscription",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/members/{{userId}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["members", "{{userId}}", "cancel"]
+            },
+            "description": "Immediately cancels a member's subscription (full expiration logic). Requires ADMIN role."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "List payment requests (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/payments?page={{page}}&pageSize={{pageSize}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "payments"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "{{page}}",
+                  "description": "Page number (1-indexed)"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "{{pageSize}}",
+                  "description": "Items per page (max 100)"
+                }
+              ]
+            },
+            "description": "Paginated payments log. ADMIN sees payments for their coach account; SUPER_ADMIN sees all."
+          },
+          "response": []
+        },
+        {
+          "name": "Get member subscription history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/members/{{userId}}/history",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "members", "{{userId}}", "history"]
+            },
+            "description": "Returns a member's full subscription history incl. end reason. ADMIN can view members on their roster; SUPER_ADMIN can view any; members can view their own. Requires ADMIN role via header by default."
+          },
+          "response": []
+        },
+        {
+          "name": "List audit log",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/audit-log?page={{page}}&pageSize={{pageSize}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "audit-log"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "{{page}}",
+                  "description": "Page number (1-indexed)"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "{{pageSize}}",
+                  "description": "Items per page (max 100)"
+                }
+              ]
+            },
+            "description": "SUPER_ADMIN only. Returns a paginated audit log of every admin action, most recent first."
+          },
+          "response": []
+        },
+        {
+          "name": "List deleted accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/deleted-accounts?page={{page}}&pageSize={{pageSize}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "deleted-accounts"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "{{page}}",
+                  "description": "Page number (1-indexed)"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "{{pageSize}}",
+                  "description": "Items per page (max 100)"
+                }
+              ]
+            },
+            "description": "SUPER_ADMIN only. Returns a paginated list of archived (deleted) accounts."
+          },
+          "response": []
+        },
+        {
+          "name": "Purge deleted account",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/deleted-accounts/{{deletedAccountId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "deleted-accounts", "{{deletedAccountId}}"]
+            },
+            "description": "SUPER_ADMIN only. Permanently removes an archived account record. Set `deletedAccountId` from the deleted-accounts list."
+          },
+          "response": []
+        },
+        {
+          "name": "List coaches (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/coaches",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "coaches"]
+            },
+            "description": "SUPER_ADMIN only. Returns all coach profiles."
+          },
+          "response": []
+        },
+        {
+          "name": "Create coach",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"coachNumber\": 4,\n  \"name\": \"New Coach\",\n  \"bio\": \"Experienced personal trainer.\",\n  \"specialty\": \"Strength\",\n  \"capacity\": 20\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/coaches",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "coaches"]
+            },
+            "description": "SUPER_ADMIN only. Promotes an existing ADMIN user into a coach profile. `userId` must be an existing ADMIN user's ID. Creates an audit log entry."
+          },
+          "response": []
+        },
+        {
+          "name": "Update coach",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bio\": \"Updated bio\",\n  \"specialty\": \"CrossFit\",\n  \"capacity\": 25\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/coaches/{{coachId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "coaches", "{{coachId}}"]
+            },
+            "description": "SUPER_ADMIN only. Updates a coach's bio, specialty, and/or capacity. Strict schema (only these keys). Creates an audit log entry. Set `coachId` to the coach's record ID."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete coach",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/coaches/{{coachId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "coaches", "{{coachId}}"]
+            },
+            "description": "SUPER_ADMIN only. Deletes a coach profile and their associated user account. Creates an audit log entry. Set `coachId` to the coach's record ID."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Contact",
+      "item": [
+        {
+          "name": "Get contact information",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/contact",
+              "host": ["{{baseUrl}}"],
+              "path": ["contact"]
+            },
+            "description": "MEMBER role only, requires an active subscription. Returns gym phone, email, address, hours, and the member's own memberId."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

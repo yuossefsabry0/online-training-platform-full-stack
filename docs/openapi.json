@@ -1,0 +1,2727 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Gym Management API",
+    "description": "Comprehensive gym management platform API. Manages user registration, authentication, subscriptions, payments, coach/member administration, and audit logging.\n\n## Authentication\nAll protected endpoints require a `Bearer <accessToken>` token in the `Authorization` header.\n\n## Role Hierarchy\n- **BASIC** — Default role after signup (unverified user).\n- **MEMBER** — Granted upon payment approval; can access subscription status, plans, and contact info.\n- **ADMIN** — Coach account; can manage members, view payments, and approve/reject payment requests.\n- **SUPER_ADMIN** — Platform administrator; full access to coach CRUD, audit logs, and deleted accounts. Implicitly allowed wherever `ADMIN` is required.\n\n## Rate Limiting\n- **Signup**: 10 requests per 15-minute window per IP.\n- **Forgot Password**: 5 requests per 15-minute window per IP.\n- **Delete Account**: 5 requests per 15-minute window per IP.\n- **Login**: Brute-force protection — account locked after repeated failures.\n\n## CORS\nAllowed origins are configured via `CORS_ORIGINS` (comma-separated). In production the list is mandatory; in development `localhost:3000` and `127.0.0.1:3000` are always allowed.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "API Support"
+    }
+  },
+  "servers": [
+    {
+      "url": "/api",
+      "description": "Base path for all endpoints"
+    }
+  ],
+  "security": [
+    { "bearerAuth": [] }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "tags": ["Health"],
+        "summary": "Health check",
+        "description": "Returns service name and uptime. No authentication required.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Service is running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "service": { "type": "string", "example": "gym-api" },
+                            "uptime": { "type": "number", "description": "Process uptime in seconds", "example": 12345.67 }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/signup": {
+      "post": {
+        "operationId": "signup",
+        "tags": ["Auth"],
+        "summary": "Register a new account",
+        "description": "Creates a new user account with role `BASIC`. A verification email is sent. **Rate limited**: 10 requests per 15-minute window per IP.",
+        "security": [],
+        "x-rate-limit": {
+          "windowMs": 900000,
+          "max": 10,
+          "code": "SIGNUP_RATE_LIMITED"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SignupRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Account created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/User" },
+                        "message": { "type": "string", "example": "Account created. Please verify your email." }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "409": { "$ref": "#/components/responses/ConflictError" },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "status": "error",
+                  "error": {
+                    "code": "SIGNUP_RATE_LIMITED",
+                    "message": "Too many signup attempts from this location. Please try again later.",
+                    "statusCode": 429,
+                    "details": { "retryAfterMs": 600000 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/verify-email": {
+      "get": {
+        "operationId": "verifyEmailViaLink",
+        "tags": ["Auth"],
+        "summary": "Verify email via link (query parameter)",
+        "description": "Verifies the user's email using a token passed as a query parameter. Typically used when the user clicks a link from their email.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 10
+            },
+            "description": "Email verification token (minimum 10 characters)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Email verified successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "user": { "$ref": "#/components/schemas/User" }
+                          }
+                        },
+                        "message": { "type": "string" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" }
+        }
+      },
+      "post": {
+        "operationId": "verifyEmailViaToken",
+        "tags": ["Auth"],
+        "summary": "Verify email via token in body",
+        "description": "Verifies the user's email using a token passed in the request body.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/EmailTokenRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Email verified successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "properties": {
+                            "user": { "$ref": "#/components/schemas/User" }
+                          }
+                        },
+                        "message": { "type": "string" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "login",
+        "tags": ["Auth"],
+        "summary": "Log in",
+        "description": "Authenticates a user and returns access + refresh tokens. The access token is valid for 24 hours. Subject to brute-force protection — repeated failures will temporarily lock the account.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/LoginResponse" },
+                        "message": { "type": "string", "example": "Login successful. The token is valid for 24 hours." }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": {
+            "description": "Invalid credentials or account deleted",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "examples": {
+                  "invalidCredentials": {
+                    "summary": "Invalid credentials",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "INVALID_CREDENTIALS", "message": "Invalid username or password", "statusCode": 401 }
+                    }
+                  },
+                  "accountDeleted": {
+                    "summary": "Account has been deleted",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "ACCOUNT_DELETED", "message": "This account has been deleted", "statusCode": 401 }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Email not verified",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "status": "error",
+                  "error": { "code": "EMAIL_NOT_VERIFIED", "message": "Please verify your email before logging in", "statusCode": 403 }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Account temporarily locked due to too many failed login attempts",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "status": "error",
+                  "error": { "code": "LOGIN_TEMPORARILY_LOCKED", "message": "Account temporarily locked due to too many failed attempts", "statusCode": 429, "details": { "retryAfterMs": 600000 } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/forgot-password": {
+      "post": {
+        "operationId": "forgotPassword",
+        "tags": ["Auth"],
+        "summary": "Request password reset",
+        "description": "Sends a password reset email if the account exists. **Rate limited**: 5 requests per 15-minute window per IP.",
+        "security": [],
+        "x-rate-limit": {
+          "windowMs": 900000,
+          "max": 5,
+          "code": "FORGOT_PASSWORD_RATE_LIMITED"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email"],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "If the account exists, a reset email has been sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "type": "null" },
+                        "message": { "type": "string", "example": "If an account with that email exists, a reset link has been sent." }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "status": "error",
+                  "error": {
+                    "code": "FORGOT_PASSWORD_RATE_LIMITED",
+                    "message": "Too many password reset requests from this location. Please try again later.",
+                    "statusCode": 429,
+                    "details": { "retryAfterMs": 600000 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/reset-password": {
+      "post": {
+        "operationId": "resetPassword",
+        "tags": ["Auth"],
+        "summary": "Reset password with token",
+        "description": "Sets a new password using a valid reset token.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ResetPasswordRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password reset successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "type": "null" },
+                        "message": { "type": "string", "example": "Password has been reset successfully." }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "operationId": "refreshAccessToken",
+        "tags": ["Auth"],
+        "summary": "Refresh access token",
+        "description": "Exchanges a valid refresh token for a new access token.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["refreshToken"],
+                "properties": {
+                  "refreshToken": {
+                    "type": "string",
+                    "description": "A valid refresh token"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Access token refreshed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/TokenRefreshResponse" },
+                        "message": { "type": "string", "example": "Access token refreshed." }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing refreshToken in request body",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "status": "error",
+                  "error": { "code": "VALIDATION_ERROR", "message": "refreshToken is required", "statusCode": 400 }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid, revoked, or expired refresh token",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "examples": {
+                  "invalidToken": {
+                    "summary": "Invalid refresh token",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "REFRESH_TOKEN_INVALID", "message": "Invalid refresh token", "statusCode": 401 }
+                    }
+                  },
+                  "sessionEnded": {
+                    "summary": "Session has ended",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "SESSION_ENDED", "message": "Session has ended. Please log in again.", "statusCode": 401 }
+                    }
+                  },
+                  "tokenRevoked": {
+                    "summary": "Token has been revoked",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "TOKEN_REVOKED", "message": "Refresh token has been revoked", "statusCode": 401 }
+                    }
+                  },
+                  "accountNotFound": {
+                    "summary": "Account no longer exists",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "ACCOUNT_NOT_FOUND", "message": "Account no longer exists", "statusCode": 401 }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "tags": ["Auth"],
+        "summary": "Log out",
+        "description": "Revokes the current access token and (optionally) the refresh token.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refreshToken": {
+                    "type": "string",
+                    "description": "Optional refresh token to revoke"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logged out successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "type": "null" },
+                        "message": { "type": "string", "example": "Logged out successfully." }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" }
+        }
+      }
+    },
+    "/auth/profile": {
+      "patch": {
+        "operationId": "updateProfile",
+        "tags": ["Auth"],
+        "summary": "Update profile nickname",
+        "description": "Updates the authenticated user's nickname. Only the `nickname` field is accepted; all other keys are rejected.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateProfileRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/UserProfile" },
+                        "message": { "type": "string" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" }
+        }
+      }
+    },
+    "/auth/account": {
+      "delete": {
+        "operationId": "deleteAccount",
+        "tags": ["Auth"],
+        "summary": "Delete own account",
+        "description": "Soft-deletes the authenticated user's account. The account data is archived in the `deleted_accounts` table. **Rate limited**: 5 requests per 15-minute window per IP.",
+        "x-rate-limit": {
+          "windowMs": 900000,
+          "max": 5,
+          "code": "DELETE_ACCOUNT_RATE_LIMITED"
+        },
+        "responses": {
+          "200": {
+            "description": "Account deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "type": "null" },
+                        "message": { "type": "string", "example": "Account deleted successfully." }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "404": {
+            "description": "Account not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "status": "error",
+                  "error": { "code": "NOT_FOUND", "message": "Account not found", "statusCode": 404 }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Cannot delete account due to active subscription or pending payment",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "examples": {
+                  "activeSubscription": {
+                    "summary": "Active subscription exists",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "ACTIVE_SUBSCRIPTION_EXISTS", "message": "Cannot delete account with an active subscription", "statusCode": 409 }
+                    }
+                  },
+                  "pendingPayment": {
+                    "summary": "Pending payment exists",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "PENDING_PAYMENT_EXISTS", "message": "Cannot delete account with a pending payment request", "statusCode": 409 }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "status": "error",
+                  "error": {
+                    "code": "DELETE_ACCOUNT_RATE_LIMITED",
+                    "message": "Too many account deletion attempts. Please try again later.",
+                    "statusCode": 429,
+                    "details": { "retryAfterMs": 600000 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/coaches/{coachNumber}": {
+      "get": {
+        "operationId": "getCoachProfile",
+        "tags": ["Coaches"],
+        "summary": "Get coach public profile",
+        "description": "Returns the public profile of a coach identified by their coach number. Any authenticated user can access this endpoint.",
+        "parameters": [
+          {
+            "name": "coachNumber",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" },
+            "description": "Coach's unique number"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Coach profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/CoachProfile" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" }
+        }
+      }
+    },
+    "/subscriptions/status": {
+      "get": {
+        "operationId": "getSubscriptionStatus",
+        "tags": ["Subscriptions"],
+        "summary": "Get current subscription status",
+        "description": "Returns the authenticated user's current subscription status, including active plan details, coach, and expiry date.",
+        "responses": {
+          "200": {
+            "description": "Subscription status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/SubscriptionStatus" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" }
+        }
+      }
+    },
+    "/subscriptions/plans": {
+      "get": {
+        "operationId": "listPlans",
+        "tags": ["Subscriptions"],
+        "summary": "List available subscription plans",
+        "description": "Returns all available subscription plans across all coaches.",
+        "responses": {
+          "200": {
+            "description": "List of plans grouped by coach",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": { "$ref": "#/components/schemas/PlanGroup" }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" }
+        }
+      }
+    },
+    "/subscriptions/confirm": {
+      "post": {
+        "operationId": "confirmSubscription",
+        "tags": ["Subscriptions"],
+        "summary": "Confirm subscription selection",
+        "description": "Validates the coach and duration selection and prepares it for payment. The server resolves extension vs new subscription from the database.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ConfirmSubscriptionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Subscription selection confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/SubscriptionConfirmation" },
+                        "message": { "type": "string" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error or plan not offered by coach",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "examples": {
+                  "validationError": {
+                    "summary": "Validation error",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "VALIDATION_ERROR", "message": "Validation failed", "statusCode": 400 }
+                    }
+                  },
+                  "planNotOffered": {
+                    "summary": "Plan not offered by coach",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "PLAN_NOT_OFFERED", "message": "This plan duration is not offered by the selected coach", "statusCode": 400 }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "404": {
+            "description": "Coach not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "status": "error",
+                  "error": { "code": "NOT_FOUND", "message": "Coach not found", "statusCode": 404 }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Subscription conflict",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "examples": {
+                  "activeSubscriptionWithDifferentCoach": {
+                    "summary": "Active subscription with a different coach",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "ACTIVE_SUBSCRIPTION_WITH_DIFFERENT_COACH", "message": "You already have an active subscription with a different coach", "statusCode": 409 }
+                    }
+                  },
+                  "coachAtCapacity": {
+                    "summary": "Coach has reached member capacity",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "COACH_AT_CAPACITY", "message": "This coach has reached their maximum member capacity", "statusCode": 409 }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments": {
+      "post": {
+        "operationId": "submitPayment",
+        "tags": ["Payments"],
+        "summary": "Submit a payment request",
+        "description": "Submits a payment request for a subscription or extension. The server determines if it is a new subscription or extension. Any authenticated user with role BASIC or MEMBER can submit.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SubmitPaymentRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Payment request submitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/PaymentSubmission" },
+                        "message": { "type": "string" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "404": {
+            "description": "Coach not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "status": "error",
+                  "error": { "code": "NOT_FOUND", "message": "Coach not found", "statusCode": 404 }
+                }
+              }
+            }
+          },
+          "409": { "$ref": "#/components/responses/ConflictError" }
+        }
+      },
+      "get": {
+        "operationId": "listPayments",
+        "tags": ["Payments"],
+        "summary": "List payment requests",
+        "description": "Returns a paginated list of payment requests. ADMIN users see payments for their own coach account; SUPER_ADMIN sees all.",
+        "parameters": [
+          { "$ref": "#/components/parameters/Page" },
+          { "$ref": "#/components/parameters/PageSize" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated payment list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/PaginatedPayments" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" }
+        }
+      }
+    },
+    "/payments/{id}/decide": {
+      "patch": {
+        "operationId": "decidePayment",
+        "tags": ["Payments"],
+        "summary": "Approve or reject a payment request",
+        "description": "ADMIN or SUPER_ADMIN approves or rejects a pending payment request. Approving activates the member's subscription.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Payment request ID (CUID)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DecidePaymentRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment decision recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/PaymentDecision" },
+                        "message": { "type": "string" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": {
+            "description": "Insufficient permissions or not your payment request",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "examples": {
+                  "insufficientRole": {
+                    "summary": "Not an admin",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "INSUFFICIENT_ROLE", "message": "This action requires one of the following roles: ADMIN", "statusCode": 403 }
+                    }
+                  },
+                  "notYourRequest": {
+                    "summary": "Payment request belongs to another coach",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "NOT_YOUR_REQUEST", "message": "This payment request does not belong to your coach account", "statusCode": 403 }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFoundError" },
+          "409": {
+            "description": "Payment decision conflict",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "examples": {
+                  "alreadyDecided": {
+                    "summary": "Request already decided",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "REQUEST_ALREADY_DECIDED", "message": "This payment request has already been decided", "statusCode": 409 }
+                    }
+                  },
+                  "approvalConflictOneCoachRule": {
+                    "summary": "One-coach rule violation",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "APPROVAL_CONFLICT_ONE_COACH_RULE", "message": "Member already has an active subscription with a different coach", "statusCode": 409 }
+                    }
+                  },
+                  "approvalConflictCapacity": {
+                    "summary": "Coach at capacity",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "APPROVAL_CONFLICT_CAPACITY", "message": "Approving this payment would exceed the coach's member capacity", "statusCode": 409 }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/members": {
+      "get": {
+        "operationId": "listMyMembers",
+        "tags": ["Members"],
+        "summary": "List members for the current coach",
+        "description": "Returns a paginated list of members belonging to the authenticated coach. ADMIN and SUPER_ADMIN roles.",
+        "parameters": [
+          { "$ref": "#/components/parameters/Page" },
+          { "$ref": "#/components/parameters/PageSize" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated member list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/PaginatedMembers" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" }
+        }
+      }
+    },
+    "/members/{userId}/extend": {
+      "post": {
+        "operationId": "extendMember",
+        "tags": ["Members"],
+        "summary": "Extend member subscription",
+        "description": "Extends a member's subscription by the specified number of months. The member must belong to the coach's roster.",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Member's user ID (CUID)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ExtendMemberRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Member extended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/MemberExtendAction" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" }
+        }
+      }
+    },
+    "/members/{userId}/change-plan": {
+      "post": {
+        "operationId": "changeMemberPlan",
+        "tags": ["Members"],
+        "summary": "Change member subscription plan",
+        "description": "Changes a member's plan duration. The new duration must be one of 1, 3, 6, or 12 months.",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Member's user ID (CUID)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ChangePlanRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/MemberExtendAction" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" }
+        }
+      }
+    },
+    "/members/{userId}/reduce": {
+      "post": {
+        "operationId": "reduceMember",
+        "tags": ["Members"],
+        "summary": "Reduce member subscription",
+        "description": "Reduces a member's subscription by the specified number of days. If reduced to zero or below, the subscription ends.",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Member's user ID (CUID)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ReduceMemberRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Member reduced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/MemberReduceAction" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" }
+        }
+      }
+    },
+    "/members/{userId}/cancel": {
+      "post": {
+        "operationId": "cancelMember",
+        "tags": ["Members"],
+        "summary": "Cancel member subscription immediately",
+        "description": "Immediately cancels a member's subscription. The member's role is reverted to BASIC.",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Member's user ID (CUID)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subscription cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "type": "null" },
+                        "message": { "type": "string", "example": "Subscription cancelled successfully." }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" }
+        }
+      }
+    },
+    "/admin/payments": {
+      "get": {
+        "operationId": "adminListPayments",
+        "tags": ["Admin"],
+        "summary": "List all payment requests (admin)",
+        "description": "ADMIN users see payments for their coach account; SUPER_ADMIN sees all payments. Paginated.",
+        "parameters": [
+          { "$ref": "#/components/parameters/Page" },
+          { "$ref": "#/components/parameters/PageSize" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated payment list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/PaginatedPayments" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" }
+        }
+      }
+    },
+    "/admin/members/{userId}/history": {
+      "get": {
+        "operationId": "getMemberHistory",
+        "tags": ["Admin"],
+        "summary": "Get member subscription history",
+        "description": "Returns the full subscription history for a specific member. ADMIN can view members on their roster; SUPER_ADMIN can view any member.",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Member's user ID (CUID)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subscription history entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": { "$ref": "#/components/schemas/SubscriptionHistoryEntry" }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" }
+        }
+      }
+    },
+    "/admin/audit-log": {
+      "get": {
+        "operationId": "listAuditLogs",
+        "tags": ["Admin"],
+        "summary": "List audit log entries",
+        "description": "SUPER_ADMIN only. Returns a paginated list of all audit log entries, sorted by most recent first.",
+        "parameters": [
+          { "$ref": "#/components/parameters/Page" },
+          { "$ref": "#/components/parameters/PageSize" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated audit log",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/PaginatedAuditLog" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" }
+        }
+      }
+    },
+    "/admin/deleted-accounts": {
+      "get": {
+        "operationId": "listDeletedAccounts",
+        "tags": ["Admin"],
+        "summary": "List deleted (archived) accounts",
+        "description": "SUPER_ADMIN only. Returns a paginated list of deleted accounts sorted by deletion date descending.",
+        "parameters": [
+          { "$ref": "#/components/parameters/Page" },
+          { "$ref": "#/components/parameters/PageSize" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated deleted accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/PaginatedDeletedAccounts" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" }
+        }
+      }
+    },
+    "/admin/deleted-accounts/{id}": {
+      "delete": {
+        "operationId": "permanentlyDeleteAccount",
+        "tags": ["Admin"],
+        "summary": "Permanently delete an archived account",
+        "description": "SUPER_ADMIN only. Permanently removes a deleted account record from the archive.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Deleted account record ID (CUID)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Archived account permanently deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "type": "null" },
+                        "message": { "type": "string", "example": "Archived account permanently deleted" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" }
+        }
+      }
+    },
+    "/admin/coaches": {
+      "get": {
+        "operationId": "listCoaches",
+        "tags": ["Admin"],
+        "summary": "List all coaches",
+        "description": "SUPER_ADMIN only. Returns all coach profiles.",
+        "responses": {
+          "200": {
+            "description": "List of coaches",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": { "$ref": "#/components/schemas/Coach" }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" }
+        }
+      },
+      "post": {
+        "operationId": "createCoach",
+        "tags": ["Admin"],
+        "summary": "Create a new coach",
+        "description": "SUPER_ADMIN only. Promotes an existing ADMIN user into a coach profile. An audit log entry is created automatically.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateCoachRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Coach created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/Coach" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error or user is not an admin",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "examples": {
+                  "validationError": {
+                    "summary": "Validation error",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "VALIDATION_ERROR", "message": "Validation failed", "statusCode": 400 }
+                    }
+                  },
+                  "notAnAdmin": {
+                    "summary": "User is not an admin",
+                    "value": {
+                      "status": "error",
+                      "error": { "code": "NOT_AN_ADMIN", "message": "The specified user does not have the ADMIN role", "statusCode": 400 }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "status": "error",
+                  "error": { "code": "NOT_FOUND", "message": "User not found", "statusCode": 404 }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Coach already exists for this user or coach number",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "status": "error",
+                  "error": { "code": "COACH_EXISTS", "message": "A coach profile already exists for this user or coach number", "statusCode": 409 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/coaches/{id}": {
+      "patch": {
+        "operationId": "updateCoach",
+        "tags": ["Admin"],
+        "summary": "Update a coach profile",
+        "description": "SUPER_ADMIN only. Updates bio, specialty, and/or capacity. An audit log entry is created automatically.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Coach ID (CUID)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateCoachRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Coach updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/Coach" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteCoach",
+        "tags": ["Admin"],
+        "summary": "Delete a coach",
+        "description": "SUPER_ADMIN only. Deletes a coach profile and their associated user account. An audit log entry is created automatically.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Coach ID (CUID)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Coach deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "type": "null" },
+                        "message": { "type": "string" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": { "$ref": "#/components/responses/ForbiddenError" },
+          "404": { "$ref": "#/components/responses/NotFoundError" },
+          "409": {
+            "description": "Coach has active members",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "example": {
+                  "status": "error",
+                  "error": { "code": "COACH_HAS_ACTIVE_MEMBERS", "message": "Cannot delete coach with active members", "statusCode": 409 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/contact": {
+      "get": {
+        "operationId": "getContactInfo",
+        "tags": ["Contact"],
+        "summary": "Get gym contact information",
+        "description": "MEMBER role only. Returns the gym's phone, email, address, hours, and the member's own memberId. Requires an active subscription.",
+        "responses": {
+          "200": {
+            "description": "Contact information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    { "$ref": "#/components/schemas/SuccessEnvelope" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": { "$ref": "#/components/schemas/ContactInfo" }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/UnauthorizedError" },
+          "403": {
+            "description": "Subscription inactive or not a MEMBER",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+                "examples": {
+                  "subscriptionInactive": {
+                    "summary": "Subscription has ended",
+                    "value": {
+                      "status": "error",
+                      "error": {
+                        "code": "SUBSCRIPTION_INACTIVE",
+                        "message": "Your subscription has ended - subscribe again to access contact information.",
+                        "statusCode": 403
+                      }
+                    }
+                  },
+                  "insufficientRole": {
+                    "summary": "Not a MEMBER",
+                    "value": {
+                      "status": "error",
+                      "error": {
+                        "code": "INSUFFICIENT_ROLE",
+                        "message": "This action requires one of the following roles: MEMBER",
+                        "statusCode": 403
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JSON Web Token obtained from `POST /auth/login`. Include as `Authorization: Bearer <token>`. Access tokens expire after 24 hours."
+      }
+    },
+    "parameters": {
+      "Page": {
+        "name": "page",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "description": "Page number (1-indexed)"
+      },
+      "PageSize": {
+        "name": "pageSize",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 10
+        },
+        "description": "Number of items per page"
+      }
+    },
+    "schemas": {
+      "SuccessEnvelope": {
+        "type": "object",
+        "required": ["status", "data"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["success"]
+          },
+          "data": {
+            "description": "Response payload (type varies by endpoint)"
+          },
+          "message": {
+            "type": "string",
+            "nullable": true,
+            "description": "Optional human-readable message"
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": ["status", "error"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["error"]
+          },
+          "error": {
+            "type": "object",
+            "required": ["code", "message", "statusCode"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "Machine-readable error code",
+                "examples": [
+                  "VALIDATION_ERROR",
+                  "UNAUTHORIZED",
+                  "FORBIDDEN",
+                  "NOT_FOUND",
+                  "CONFLICT",
+                  "RATE_LIMITED",
+                  "INTERNAL_ERROR",
+                  "MALFORMED_JSON",
+                  "TOKEN_MISSING",
+                  "TOKEN_EXPIRED",
+                  "TOKEN_INVALID",
+                  "TOKEN_REVOKED",
+                  "ACCOUNT_NOT_FOUND",
+                  "ACCOUNT_DELETED",
+                  "INSUFFICIENT_ROLE",
+                  "SUBSCRIPTION_INACTIVE",
+                  "SIGNUP_RATE_LIMITED",
+                  "FORGOT_PASSWORD_RATE_LIMITED",
+                  "DELETE_ACCOUNT_RATE_LIMITED",
+                  "LOGIN_TEMPORARILY_LOCKED",
+                  "INVALID_CREDENTIALS",
+                  "EMAIL_NOT_VERIFIED",
+                  "ACTIVE_SUBSCRIPTION_EXISTS",
+                  "PENDING_PAYMENT_EXISTS",
+                  "ACTIVE_SUBSCRIPTION_WITH_DIFFERENT_COACH",
+                  "COACH_AT_CAPACITY",
+                  "COACH_EXISTS",
+                  "COACH_HAS_ACTIVE_MEMBERS",
+                  "NOT_AN_ADMIN",
+                  "NOT_YOUR_REQUEST",
+                  "REQUEST_ALREADY_DECIDED",
+                  "APPROVAL_CONFLICT_ONE_COACH_RULE",
+                  "APPROVAL_CONFLICT_CAPACITY",
+                  "PLAN_NOT_OFFERED",
+                  "REFRESH_TOKEN_INVALID",
+                  "SESSION_ENDED"
+                ]
+              },
+              "message": {
+                "type": "string",
+                "description": "Human-readable error message"
+              },
+              "statusCode": {
+                "type": "integer",
+                "description": "HTTP status code"
+              },
+              "details": {
+                "description": "Optional additional error context (e.g. retryAfterMs for rate limits, or field-level validation details)",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "retryAfterMs": {
+                        "type": "integer",
+                        "description": "Milliseconds until the rate limit window resets"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "description": "Field-level validation errors or other context"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "SignupRequest": {
+        "type": "object",
+        "required": ["username", "email", "password"],
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 32,
+            "description": "Unique username (4-32 characters)"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Valid email address"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 72,
+            "description": "Password (8-72 characters)"
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Username"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Password"
+          }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "description": "JWT access token (valid for 24 hours)"
+          },
+          "refreshToken": {
+            "type": "string",
+            "description": "JWT refresh token for obtaining new access tokens"
+          },
+          "sessionExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp of when the session expires"
+          },
+          "user": { "$ref": "#/components/schemas/User" }
+        }
+      },
+      "TokenRefreshResponse": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "description": "New JWT access token"
+          },
+          "sessionExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp of when the session expires"
+          }
+        }
+      },
+      "EmailTokenRequest": {
+        "type": "object",
+        "required": ["token"],
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 10,
+            "description": "Email verification token (minimum 10 characters)"
+          }
+        }
+      },
+      "ResetPasswordRequest": {
+        "type": "object",
+        "required": ["token", "newPassword"],
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 10,
+            "description": "Password reset token from email"
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 72,
+            "description": "New password (8-72 characters)"
+          }
+        }
+      },
+      "UpdateProfileRequest": {
+        "type": "object",
+        "required": ["nickname"],
+        "additionalProperties": false,
+        "properties": {
+          "nickname": {
+            "type": "string",
+            "maxLength": 50,
+            "description": "New nickname (trimmed, max 50 characters). Only this field is accepted; unknown keys are rejected."
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "User ID (CUID)",
+            "example": "clx1234567890abcdef"
+          },
+          "username": {
+            "type": "string",
+            "description": "Unique username",
+            "example": "ahmed"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Email address",
+            "example": "ahmed@example.com"
+          },
+          "nickname": {
+            "type": "string",
+            "nullable": true,
+            "description": "Display nickname",
+            "example": "Coach Ahmed"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "isVerified": {
+            "type": "boolean",
+            "description": "Whether the email has been verified",
+            "example": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UserProfile": {
+        "type": "object",
+        "description": "Returned from profile update. Same shape as User.",
+        "properties": {
+          "id": { "type": "string" },
+          "username": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "nickname": { "type": "string", "nullable": true },
+          "role": { "$ref": "#/components/schemas/Role" },
+          "isVerified": { "type": "boolean" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Role": {
+        "type": "string",
+        "enum": ["BASIC", "MEMBER", "ADMIN", "SUPER_ADMIN"],
+        "description": "User role. Lifecycle: BASIC (default) -> MEMBER (on payment approval) -> BASIC (on expiry/cancel). ADMIN = coach, SUPER_ADMIN = manages coaches."
+      },
+      "CoachProfile": {
+        "type": "object",
+        "description": "Public-facing coach profile returned by GET /coaches/:coachNumber",
+        "properties": {
+          "coachId": { "type": "string" },
+          "coachNumber": { "type": "integer" },
+          "name": { "type": "string" },
+          "bio": { "type": "string" },
+          "specialty": { "type": "string" }
+        }
+      },
+      "Coach": {
+        "type": "object",
+        "description": "Full coach record returned by admin endpoints",
+        "properties": {
+          "coachId": { "type": "string" },
+          "coachNumber": { "type": "integer" },
+          "name": { "type": "string" },
+          "bio": { "type": "string" },
+          "specialty": { "type": "string" },
+          "capacity": { "type": "integer", "nullable": true }
+        }
+      },
+      "Plan": {
+        "type": "object",
+        "properties": {
+          "planId": { "type": "string" },
+          "name": { "type": "string" },
+          "months": { "type": "integer" },
+          "priceCents": { "type": "integer", "description": "Price in cents" },
+          "price": { "type": "number", "description": "Price in currency units (priceCents / 100)" }
+        }
+      },
+      "PlanGroup": {
+        "type": "object",
+        "description": "Plans grouped by coach",
+        "properties": {
+          "coachId": { "type": "string" },
+          "coachNumber": { "type": "integer" },
+          "coachName": { "type": "string" },
+          "specialty": { "type": "string" },
+          "capacity": { "type": "integer", "nullable": true },
+          "plans": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Plan" }
+          }
+        }
+      },
+      "ConfirmSubscriptionRequest": {
+        "type": "object",
+        "required": ["coachNumber", "months"],
+        "properties": {
+          "coachNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Coach's unique number"
+          },
+          "months": {
+            "type": "integer",
+            "enum": [1, 3, 6, 12],
+            "description": "Subscription duration in months"
+          }
+        }
+      },
+      "SubscriptionConfirmation": {
+        "type": "object",
+        "description": "Data returned after confirming a subscription selection, to be forwarded to payment",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["NEW", "EXTENSION"],
+            "description": "Whether this is a new subscription or an extension"
+          },
+          "coach": {
+            "type": "object",
+            "description": "Coach details",
+            "properties": {
+              "coachId": { "type": "string" },
+              "coachNumber": { "type": "integer" },
+              "name": { "type": "string" }
+            }
+          },
+          "plan": {
+            "type": "object",
+            "description": "Plan details",
+            "properties": {
+              "planId": { "type": "string" },
+              "name": { "type": "string" },
+              "months": { "type": "integer" },
+              "priceCents": { "type": "integer" }
+            }
+          }
+        }
+      },
+      "SubscriptionStatus": {
+        "type": "object",
+        "description": "Current subscription status for the authenticated member",
+        "properties": {
+          "role": { "$ref": "#/components/schemas/Role" },
+          "plan": { "type": "string", "description": "Current plan name" },
+          "contactUsAccess": { "type": "boolean", "description": "Whether the member can access contact information" },
+          "subscription": {
+            "type": "object",
+            "nullable": true,
+            "description": "Active subscription details, or null if no active subscription",
+            "properties": {
+              "memberId": { "type": "string" },
+              "coach": {
+                "type": "object",
+                "properties": {
+                  "coachId": { "type": "string" },
+                  "coachNumber": { "type": "integer" },
+                  "name": { "type": "string" }
+                }
+              },
+              "startsAt": { "type": "string", "format": "date-time" },
+              "expiresAt": { "type": "string", "format": "date-time" },
+              "remainingDays": { "type": "integer", "description": "Number of days until subscription expires" }
+            }
+          },
+          "expiringSoon": { "type": "boolean", "description": "Whether the subscription is expiring soon" },
+          "warning": { "type": "string", "nullable": true, "description": "Optional warning message (e.g. approaching expiry)" }
+        }
+      },
+      "SubmitPaymentRequest": {
+        "type": "object",
+        "required": ["holderName", "reference", "amount", "packageName", "coachNumber"],
+        "properties": {
+          "holderName": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80,
+            "description": "Account holder's name"
+          },
+          "reference": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9\\-_]+$",
+            "description": "Payment reference number (letters, digits, dashes, underscores only)"
+          },
+          "amount": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Payment amount (positive number, in the currency unit)"
+          },
+          "packageName": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 50,
+            "description": "Package name being purchased"
+          },
+          "coachNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Coach number for the subscription"
+          }
+        }
+      },
+      "PaymentSubmission": {
+        "type": "object",
+        "description": "Summary of a submitted payment request",
+        "properties": {
+          "id": { "type": "string", "description": "Payment request ID" },
+          "status": { "$ref": "#/components/schemas/PaymentStatus" },
+          "isExtension": { "type": "boolean", "description": "Whether this is an extension payment" },
+          "packageName": { "type": "string" },
+          "amount": { "type": "number", "description": "Payment amount in currency units (amountCents / 100)" }
+        }
+      },
+      "DecidePaymentRequest": {
+        "type": "object",
+        "required": ["action"],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["approve", "reject"],
+            "description": "Decision on the payment request"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "Optional note (e.g. rejection reason)",
+            "nullable": true
+          }
+        }
+      },
+      "PaymentDecision": {
+        "type": "object",
+        "description": "Result of a payment decision",
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "$ref": "#/components/schemas/PaymentStatus" }
+        }
+      },
+      "PaymentStatus": {
+        "type": "string",
+        "enum": ["PENDING", "APPROVED", "REJECTED"],
+        "description": "Status of a payment request"
+      },
+      "PublicPayment": {
+        "type": "object",
+        "description": "Public payment request record as returned by toPublicPayment (used in GET /payments and GET /admin/payments)",
+        "properties": {
+          "id": { "type": "string" },
+          "packageName": { "type": "string" },
+          "amountCents": { "type": "integer" },
+          "amount": { "type": "number", "description": "Payment amount in currency units (amountCents / 100)" },
+          "reference": { "type": "string" },
+          "holderName": { "type": "string" },
+          "status": { "$ref": "#/components/schemas/PaymentStatus" },
+          "isExtension": { "type": "boolean" },
+          "decidedAt": { "type": "string", "format": "date-time", "nullable": true },
+          "rejectionNote": { "type": "string", "nullable": true },
+          "coach": {
+            "type": "object",
+            "description": "Coach who owns this payment request",
+            "properties": {
+              "id": { "type": "string" },
+              "coachNumber": { "type": "integer" },
+              "name": { "type": "string" }
+            }
+          },
+          "user": {
+            "type": "object",
+            "description": "User who submitted the payment request",
+            "properties": {
+              "id": { "type": "string" },
+              "username": { "type": "string" },
+              "email": { "type": "string" },
+              "role": { "$ref": "#/components/schemas/Role" }
+            }
+          }
+        }
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "page": { "type": "integer", "description": "Current page number" },
+          "pageSize": { "type": "integer", "description": "Items per page" },
+          "total": { "type": "integer", "description": "Total number of items" },
+          "totalPages": { "type": "integer", "description": "Total number of pages" }
+        }
+      },
+      "PaginatedPayments": {
+        "type": "object",
+        "properties": {
+          "pagination": { "$ref": "#/components/schemas/Pagination" },
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/PublicPayment" }
+          }
+        }
+      },
+      "ExtendMemberRequest": {
+        "type": "object",
+        "required": ["months"],
+        "properties": {
+          "months": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 36,
+            "description": "Number of months to extend"
+          }
+        }
+      },
+      "ChangePlanRequest": {
+        "type": "object",
+        "required": ["months"],
+        "properties": {
+          "months": {
+            "type": "integer",
+            "enum": [1, 3, 6, 12],
+            "description": "New subscription duration in months"
+          }
+        }
+      },
+      "ReduceMemberRequest": {
+        "type": "object",
+        "required": ["days"],
+        "properties": {
+          "days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1095,
+            "description": "Number of days to reduce the subscription by (max 3 years)"
+          }
+        }
+      },
+      "MemberExtendAction": {
+        "type": "object",
+        "description": "Result of a member extend or change-plan action",
+        "properties": {
+          "expiresAt": { "type": "string", "format": "date-time", "description": "New subscription expiry date" },
+          "message": { "type": "string", "description": "Human-readable result message" }
+        }
+      },
+      "MemberReduceAction": {
+        "type": "object",
+        "description": "Result of a member reduce action",
+        "properties": {
+          "ended": { "type": "boolean", "description": "Whether the subscription was ended (reduced to zero or below)" },
+          "expiresAt": { "type": "string", "format": "date-time", "nullable": true, "description": "New expiry date, or null if subscription ended" },
+          "message": { "type": "string", "description": "Human-readable result message" }
+        }
+      },
+      "Member": {
+        "type": "object",
+        "description": "Member record in the coach's member list",
+        "properties": {
+          "userId": { "type": "string" },
+          "email": { "type": "string" },
+          "username": { "type": "string" },
+          "nickname": { "type": "string", "nullable": true },
+          "memberId": { "type": "string", "nullable": true },
+          "startsAt": { "type": "string", "format": "date-time", "nullable": true },
+          "expiresAt": { "type": "string", "format": "date-time", "nullable": true },
+          "remainingDays": { "type": "integer", "description": "Number of days until subscription expires" }
+        }
+      },
+      "PaginatedMembers": {
+        "type": "object",
+        "properties": {
+          "pagination": { "$ref": "#/components/schemas/Pagination" },
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Member" }
+          }
+        }
+      },
+      "SubscriptionHistoryEntry": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "coachId": { "type": "string" },
+          "coachName": { "type": "string" },
+          "planName": { "type": "string" },
+          "months": { "type": "integer" },
+          "startedAt": { "type": "string", "format": "date-time" },
+          "endedAt": { "type": "string", "format": "date-time" },
+          "endReason": {
+            "type": "string",
+            "enum": ["EXPIRED", "CANCELLED", "REDUCED_TO_ZERO"],
+            "description": "Reason the subscription ended"
+          }
+        }
+      },
+      "AuditLogEntry": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "actor": { "type": "string", "description": "Username of the actor" },
+          "actorRole": { "type": "string", "description": "Role of the actor" },
+          "action": { "type": "string", "description": "Action performed (e.g. CREATE_COACH, UPDATE_COACH)" },
+          "targetUser": { "type": "string", "nullable": true, "description": "Username of the target user" },
+          "details": {
+            "description": "Additional context as a JSON object or raw string",
+            "oneOf": [
+              { "type": "object" },
+              { "type": "string", "nullable": true }
+            ]
+          },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "PaginatedAuditLog": {
+        "type": "object",
+        "properties": {
+          "pagination": { "$ref": "#/components/schemas/Pagination" },
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/AuditLogEntry" }
+          }
+        }
+      },
+      "DeletedAccount": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "originalId": { "type": "string", "description": "The original user ID before deletion" },
+          "username": { "type": "string" },
+          "email": { "type": "string" },
+          "roleAtDeletion": { "$ref": "#/components/schemas/Role" },
+          "deletedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "PaginatedDeletedAccounts": {
+        "type": "object",
+        "properties": {
+          "pagination": { "$ref": "#/components/schemas/Pagination" },
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/DeletedAccount" }
+          }
+        }
+      },
+      "CreateCoachRequest": {
+        "type": "object",
+        "required": ["userId", "coachNumber", "name"],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "minLength": 6,
+            "description": "ID of an existing ADMIN user to promote into a coach profile"
+          },
+          "coachNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Unique coach number"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 60,
+            "description": "Coach's display name"
+          },
+          "bio": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "Coach biography",
+            "nullable": true
+          },
+          "specialty": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "Coach specialty",
+            "nullable": true
+          },
+          "capacity": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Maximum number of members",
+            "nullable": true
+          }
+        }
+      },
+      "UpdateCoachRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "bio": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "Coach biography"
+          },
+          "specialty": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "Coach specialty"
+          },
+          "capacity": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Maximum number of members",
+            "nullable": true
+          }
+        }
+      },
+      "ContactInfo": {
+        "type": "object",
+        "description": "Gym contact information (available to active MEMBERS only)",
+        "properties": {
+          "gymPhone": { "type": "string", "example": "+20-100-000-0000" },
+          "gymEmail": { "type": "string", "format": "email", "example": "contact@gym.example" },
+          "address": { "type": "string", "example": "12 Tahrir Square, Cairo" },
+          "hours": { "type": "string", "example": "06:00 - 23:00 daily" },
+          "memberId": { "type": "string", "description": "The member's own memberId", "example": "MEM-001" }
+        }
+      }
+    },
+    "responses": {
+      "ValidationError": {
+        "description": "Validation failed (invalid input or malformed JSON)",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "examples": {
+              "validationError": {
+                "summary": "Zod validation error",
+                "value": {
+                  "status": "error",
+                  "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "Validation failed",
+                    "statusCode": 400,
+                    "details": {
+                      "issues": [
+                        {
+                          "code": "too_small",
+                          "message": "Username must be at least 4 characters",
+                          "path": ["username"]
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
+              "malformedJson": {
+                "summary": "Malformed JSON body",
+                "value": {
+                  "status": "error",
+                  "error": {
+                    "code": "MALFORMED_JSON",
+                    "message": "Request body contains malformed JSON",
+                    "statusCode": 400
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "UnauthorizedError": {
+        "description": "Authentication required or token invalid",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "examples": {
+              "missingToken": {
+                "summary": "No Authorization header",
+                "value": {
+                  "status": "error",
+                  "error": { "code": "TOKEN_MISSING", "message": "Missing or malformed Authorization header", "statusCode": 401 }
+                }
+              },
+              "expiredToken": {
+                "summary": "Token expired",
+                "value": {
+                  "status": "error",
+                  "error": { "code": "TOKEN_EXPIRED", "message": "Token has expired. Please log in again.", "statusCode": 401 }
+                }
+              },
+              "invalidToken": {
+                "summary": "Invalid token",
+                "value": {
+                  "status": "error",
+                  "error": { "code": "TOKEN_INVALID", "message": "Invalid authentication token", "statusCode": 401 }
+                }
+              },
+              "revokedToken": {
+                "summary": "Token revoked (logged out)",
+                "value": {
+                  "status": "error",
+                  "error": { "code": "TOKEN_REVOKED", "message": "Token has been revoked (logged out)", "statusCode": 401 }
+                }
+              },
+              "accountNotFound": {
+                "summary": "User no longer exists",
+                "value": {
+                  "status": "error",
+                  "error": { "code": "ACCOUNT_NOT_FOUND", "message": "Account no longer exists", "statusCode": 401 }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ForbiddenError": {
+        "description": "Insufficient role permissions",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "example": {
+              "status": "error",
+              "error": {
+                "code": "INSUFFICIENT_ROLE",
+                "message": "This action requires one of the following roles: ADMIN",
+                "statusCode": 403
+              }
+            }
+          }
+        }
+      },
+      "NotFoundError": {
+        "description": "Resource not found",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "examples": {
+              "notFound": {
+                "summary": "Generic not found",
+                "value": {
+                  "status": "error",
+                  "error": { "code": "NOT_FOUND", "message": "Resource not found", "statusCode": 404 }
+                }
+              },
+              "routeNotFound": {
+                "summary": "Route not found",
+                "value": {
+                  "status": "error",
+                  "error": { "code": "NOT_FOUND", "message": "Route not found: GET /api/nonexistent", "statusCode": 404 }
+                }
+              },
+              "recordNotFound": {
+                "summary": "Prisma record not found",
+                "value": {
+                  "status": "error",
+                  "error": { "code": "NOT_FOUND", "message": "Record not found", "statusCode": 404 }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ConflictError": {
+        "description": "Resource conflict (e.g. duplicate unique field)",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "example": {
+              "status": "error",
+              "error": {
+                "code": "CONFLICT",
+                "message": "A record with the same unique value already exists",
+                "statusCode": 409
+              }
+            }
+          }
+        }
+      },
+      "RateLimitError": {
+        "description": "Too many requests",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "example": {
+              "status": "error",
+              "error": {
+                "code": "RATE_LIMITED",
+                "message": "Too many requests. Please try again later.",
+                "statusCode": 429,
+                "details": { "retryAfterMs": 600000 }
+              }
+            }
+          }
+        }
+      },
+      "InternalServerError": {
+        "description": "Unexpected server error",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "example": {
+              "status": "error",
+              "error": {
+                "code": "INTERNAL_ERROR",
+                "message": "Internal server error",
+                "statusCode": 500
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    { "name": "Health", "description": "Service health check" },
+    { "name": "Auth", "description": "Registration, login, email verification, password reset, token refresh, profile management, and account deletion" },
+    { "name": "Coaches", "description": "Public coach profile lookup" },
+    { "name": "Subscriptions", "description": "Subscription status, available plans, and subscription confirmation" },
+    { "name": "Payments", "description": "Payment request submission, approval/rejection, and listing" },
+    { "name": "Members", "description": "Coach-side member management: list, extend, change plan, reduce, and cancel subscriptions" },
+    { "name": "Admin", "description": "Admin dashboard: payments log, member history, audit log, deleted accounts, and coach CRUD" },
+    { "name": "Contact", "description": "Gym contact information for active members" }
+  ]
+}
